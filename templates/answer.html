@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Answer</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <h2>{{ answer|safe }}</h2>
+  <a href="/ask">Ask another</a>
+</body>
+</html>
