@@ -99,8 +99,8 @@
                 <div>
                 {% for prob in practice_problems %}
                     <div style="margin-bottom: 18px;">
-                        <strong>Q:</strong> {{ prob.problem }}<br>
-                        <strong>A:</strong> {{ prob.solution }}
+                        <strong>Q:</strong> {{ prob.problem|safe }}<br>
+                        <strong>A:</strong> {{ prob.solution|safe }}
                     </div>
                 {% endfor %}
                 </div>

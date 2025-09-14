@@ -96,8 +96,8 @@ def view_lesson(class_name, unit_name, lesson_name):
                     # Get practice problems
                     problems = lesson.get("practiceProblems", [])
                     for prob in problems:
-                        question = prob.get("problem", "")
-                        solution = prob.get("solution", "")
+                        question = Markup(markdown.markdown(prob.get("problem", "")))
+                        solution = Markup(markdown.markdown(prob.get("solution", "")))
                         practice_problems.append({"problem": question, "solution": solution})
                     # Previous/next lesson
                     if idx > 0:
