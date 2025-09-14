@@ -90,37 +90,61 @@
         </script>
     </div>
     <div style="flex: 1; padding: 30px;">
-        {% if lesson_content %}
-            <h2>{{ selected_lesson }}</h2>
-            <div>{{ lesson_content|safe }}</div>
-            {% if practice_problems and practice_problems|length > 0 %}
-                <hr>
-                <h3>Practice Problems</h3>
-                <div>
-                {% for prob in practice_problems %}
-                    <div style="margin-bottom: 18px;">
-                        <strong>Q:</strong> {{ prob.problem|safe }}<br>
-                        <strong>A:</strong> {{ prob.solution|safe }}
+        <div style="display: flex;">
+            <div style="flex: 1;">
+                {% if lesson_content %}
+                    <h2>{{ selected_lesson }}</h2>
+                    <div>{{ lesson_content|safe }}</div>
+                    {% if practice_problems and practice_problems|length > 0 %}
+                        <hr>
+                        <h3>Practice Problems</h3>
+                        <div>
+                        {% for prob in practice_problems %}
+                            <div style="margin-bottom: 18px;">
+                                <strong>Q:</strong> {{ prob.problem|safe }}<br>
+                                <strong>A:</strong> {{ prob.solution|safe }}
+                            </div>
+                        {% endfor %}
+                        </div>
+                    {% endif %}
+                    <hr>
+                    <div style="display: flex; justify-content: space-between; margin-top: 30px;">
+                        {% if prev_lesson %}
+                            <a href="{{ url_for('view_lesson', class_name=class_name, unit_name=unit_name, lesson_name=prev_lesson) }}" class="btn">&#8592; Previous Lesson</a>
+                        {% else %}
+                            <span></span>
+                        {% endif %}
+                        {% if next_lesson %}
+                            <a href="{{ url_for('view_lesson', class_name=class_name, unit_name=unit_name, lesson_name=next_lesson) }}" class="btn">Next Lesson &#8594;</a>
+                        {% else %}
+                            <span></span>
+                        {% endif %}
                     </div>
-                {% endfor %}
-                </div>
-            {% endif %}
-            <hr>
-            <div style="display: flex; justify-content: space-between; margin-top: 30px;">
-                {% if prev_lesson %}
-                    <a href="{{ url_for('view_lesson', class_name=class_name, unit_name=unit_name, lesson_name=prev_lesson) }}" class="btn">&#8592; Previous Lesson</a>
                 {% else %}
-                    <span></span>
-                {% endif %}
-                {% if next_lesson %}
-                    <a href="{{ url_for('view_lesson', class_name=class_name, unit_name=unit_name, lesson_name=next_lesson) }}" class="btn">Next Lesson &#8594;</a>
-                {% else %}
-                    <span></span>
+                    <h2>Select a lesson to view its content.</h2>
                 {% endif %}
             </div>
-        {% else %}
-            <h2>Select a lesson to view its content.</h2>
-        {% endif %}
+            <div style="width: 350px; min-width: 300px; background: #f7f7f7; border-left: 1px solid #ccc; padding: 20px;">
+                <h3>Lesson Assistant</h3>
+                <form method="post" action="{{ url_for('lesson_assistant', class_name=class_name, unit_name=unit_name, lesson_name=selected_lesson) }}">
+                    <label for="assistant_question">Ask a question about this lesson:</label><br>
+                    <textarea id="assistant_question" name="assistant_question" rows="3" style="width: 100%;"></textarea><br>
+                    <button type="submit" class="btn" style="margin-top: 10px;">Ask</button>
+                </form>
+                {% if assistant_question %}
+                    <div style="margin-top: 18px;">
+                        <strong>Your question:</strong>
+                        <div>{{ assistant_question }}</div>
+                    </div>
+                {% endif %}
+                {% if assistant_answer %}
+                    <div style="margin-top: 18px;">
+                        <strong>Assistant's answer:</strong>
+                        <div>{{ assistant_answer|safe }}</div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
         <style>
         .btn {
             background: #333;

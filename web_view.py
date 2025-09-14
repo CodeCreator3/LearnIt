@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, request, redirect, url_for
 from markupsafe import Markup
 from chat import ask_question  # Import your function
@@ -105,6 +104,52 @@ def view_lesson(class_name, unit_name, lesson_name):
                     if idx < len(lessons)-1:
                         next_lesson = lessons[idx+1].get("lesson_name", "")
     return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=selected_lesson, lesson_content=lesson_content, practice_problems=practice_problems, unit_name=unit_name, prev_lesson=prev_lesson, next_lesson=next_lesson)
+
+# Assistant Q&A for lesson
+@app.route("/class/<class_name>/<unit_name>/<lesson_name>/ask", methods=["POST"])
+def lesson_assistant(class_name, unit_name, lesson_name):
+    import os
+    import json as pyjson
+    from chat import ask_question
+    classes_dir = "classes"
+    json_path = os.path.join(classes_dir, f"{class_name}.json")
+    if not os.path.exists(json_path):
+        return redirect(url_for("home"))
+    with open(json_path, "r", encoding="utf-8") as f:
+        class_data = pyjson.load(f)
+    units = class_data["units"] if isinstance(class_data, dict) and "units" in class_data else []
+    selected_lesson = None
+    lesson_content = None
+    practice_problems = []
+    prev_lesson = None
+    next_lesson = None
+    assistant_answer = None
+    question = request.form.get("assistant_question", "")
+    # Find the lesson object/content and prev/next
+    for unit in units:
+        if unit.get("unit_name", "") == unit_name:
+            lessons = unit.get("lessons", [])
+            for idx, lesson in enumerate(lessons):
+                lesson_name_val = lesson.get("lesson_name", "")
+                if lesson_name_val == lesson_name:
+                    selected_lesson = lesson_name_val
+                    content_val = lesson.get("content", "")
+                    lesson_content = Markup(markdown.markdown(content_val or ""))
+                    problems = lesson.get("practiceProblems", [])
+                    for prob in problems:
+                        question_md = Markup(markdown.markdown(prob.get("problem", "")))
+                        solution_md = Markup(markdown.markdown(prob.get("solution", "")))
+                        practice_problems.append({"problem": question_md, "solution": solution_md})
+                    if idx > 0:
+                        prev_lesson = lessons[idx-1].get("lesson_name", "")
+                    if idx < len(lessons)-1:
+                        next_lesson = lessons[idx+1].get("lesson_name", "")
+                    # Get assistant answer
+                    if question:
+                        # Provide lesson content as context
+                        prompt = f"You are an assistant helping a student with the following lesson.\nLesson content:\n{content_val}\n\nStudent question: {question}"
+                        assistant_answer = Markup(markdown.markdown(ask_question(prompt)))
+    return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=selected_lesson, lesson_content=lesson_content, practice_problems=practice_problems, unit_name=unit_name, prev_lesson=prev_lesson, next_lesson=next_lesson, assistant_answer=assistant_answer, assistant_question=question)
 
 if __name__ == "__main__":
     app.run(debug=True)
