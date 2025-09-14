@@ -136,6 +136,9 @@ def lesson_assistant(class_name, unit_name, lesson_name):
                     content_val = lesson.get("content", "")
                     lesson_content = Markup(markdown.markdown(content_val or ""))
                     problems = lesson.get("practiceProblems", [])
+                    problems_text = "\n".join([
+                        f"Q: {prob.get('problem', '')}\nA: {prob.get('solution', '')}" for prob in problems
+                    ])
                     for prob in problems:
                         question_md = Markup(markdown.markdown(prob.get("problem", "")))
                         solution_md = Markup(markdown.markdown(prob.get("solution", "")))
@@ -146,8 +149,8 @@ def lesson_assistant(class_name, unit_name, lesson_name):
                         next_lesson = lessons[idx+1].get("lesson_name", "")
                     # Get assistant answer
                     if question:
-                        # Provide lesson content as context
-                        prompt = f"You are an assistant helping a student with the following lesson.\nLesson content:\n{content_val}\n\nStudent question: {question}"
+                        # Provide lesson content and practice problems as context
+                        prompt = f"You are an assistant helping a student with the following lesson.\nLesson content:\n{content_val}\n\nPractice Problems:\n{problems_text}\n\nStudent question: {question}"
                         assistant_answer = Markup(markdown.markdown(ask_question(prompt)))
     return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=selected_lesson, lesson_content=lesson_content, practice_problems=practice_problems, unit_name=unit_name, prev_lesson=prev_lesson, next_lesson=next_lesson, assistant_answer=assistant_answer, assistant_question=question)
 

@@ -101,6 +101,7 @@
                         <div>
                         {% for prob in practice_problems %}
                             <div style="margin-bottom: 18px;">
+                                <strong>Problem {{ loop.index }}:</strong><br>
                                 <strong>Q:</strong> {{ prob.problem|safe }}<br>
                                 <strong>A:</strong> {{ prob.solution|safe }}
                             </div>
