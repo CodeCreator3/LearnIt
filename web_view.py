@@ -81,11 +81,13 @@ def view_lesson(class_name, unit_name, lesson_name):
     selected_lesson = None
     lesson_content = None
     practice_problems = []
-    # Find the lesson object/content
+    prev_lesson = None
+    next_lesson = None
+    # Find the lesson object/content and prev/next
     for unit in units:
         if unit.get("unit_name", "") == unit_name:
             lessons = unit.get("lessons", [])
-            for lesson in lessons:
+            for idx, lesson in enumerate(lessons):
                 lesson_name_val = lesson.get("lesson_name", "")
                 if lesson_name_val == lesson_name:
                     selected_lesson = lesson_name_val
@@ -97,7 +99,12 @@ def view_lesson(class_name, unit_name, lesson_name):
                         question = prob.get("problem", "")
                         solution = prob.get("solution", "")
                         practice_problems.append({"problem": question, "solution": solution})
-    return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=selected_lesson, lesson_content=lesson_content, practice_problems=practice_problems)
+                    # Previous/next lesson
+                    if idx > 0:
+                        prev_lesson = lessons[idx-1].get("lesson_name", "")
+                    if idx < len(lessons)-1:
+                        next_lesson = lessons[idx+1].get("lesson_name", "")
+    return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=selected_lesson, lesson_content=lesson_content, practice_problems=practice_problems, unit_name=unit_name, prev_lesson=prev_lesson, next_lesson=next_lesson)
 
 if __name__ == "__main__":
     app.run(debug=True)

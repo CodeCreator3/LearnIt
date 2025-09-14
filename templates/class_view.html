@@ -105,9 +105,36 @@
                 {% endfor %}
                 </div>
             {% endif %}
+            <hr>
+            <div style="display: flex; justify-content: space-between; margin-top: 30px;">
+                {% if prev_lesson %}
+                    <a href="{{ url_for('view_lesson', class_name=class_name, unit_name=unit_name, lesson_name=prev_lesson) }}" class="btn">&#8592; Previous Lesson</a>
+                {% else %}
+                    <span></span>
+                {% endif %}
+                {% if next_lesson %}
+                    <a href="{{ url_for('view_lesson', class_name=class_name, unit_name=unit_name, lesson_name=next_lesson) }}" class="btn">Next Lesson &#8594;</a>
+                {% else %}
+                    <span></span>
+                {% endif %}
+            </div>
         {% else %}
             <h2>Select a lesson to view its content.</h2>
         {% endif %}
+        <style>
+        .btn {
+            background: #333;
+            color: #ffd700;
+            padding: 8px 18px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .btn:hover {
+            background: #444;
+        }
+        </style>
     </div>
 </div>
 </body>
