@@ -80,6 +80,7 @@ def view_lesson(class_name, unit_name, lesson_name):
     units = class_data["units"] if isinstance(class_data, dict) and "units" in class_data else []
     selected_lesson = None
     lesson_content = None
+    practice_problems = []
     # Find the lesson object/content
     for unit in units:
         if unit.get("unit_name", "") == unit_name:
@@ -89,9 +90,14 @@ def view_lesson(class_name, unit_name, lesson_name):
                 if lesson_name_val == lesson_name:
                     selected_lesson = lesson_name_val
                     content_val = lesson.get("content", "")
-                    # Render markdown
                     lesson_content = Markup(markdown.markdown(content_val or ""))
-    return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=selected_lesson, lesson_content=lesson_content)
+                    # Get practice problems
+                    problems = lesson.get("practiceProblems", [])
+                    for prob in problems:
+                        question = prob.get("problem", "")
+                        solution = prob.get("solution", "")
+                        practice_problems.append({"problem": question, "solution": solution})
+    return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=selected_lesson, lesson_content=lesson_content, practice_problems=practice_problems)
 
 if __name__ == "__main__":
     app.run(debug=True)

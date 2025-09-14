@@ -34,7 +34,7 @@ def ask_question(input: str) -> str:
     response = ollama.chat(
         model="llama3",
         messages=[
-            {"role": "user", "content": input + " /n Please answer in markdown format."}
+            {"role": "system", "content": input + " /n Please answer in markdown format."}
         ],
         options={
             "temperature": 0.7,
