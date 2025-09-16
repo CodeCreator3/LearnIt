@@ -2,6 +2,7 @@ import ollama
 import json
 import random
 import re
+import threading
 
 def create_class(class_name: str):
     units = message_to_json(ask_question(input="Please create a json file with an array containing the unit names for a college class called " + class_name + ". The format for the name of each unit should be \"Unit X: [Unit Name]\". The json file should be in the format {\"units\": [array of unit names]}. Please respond with only the json file and nothing else."))

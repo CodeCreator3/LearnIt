@@ -7,11 +7,89 @@
 </head>
 <body>
     <h1>Create a New Class</h1>
-    <form method="post">
+    <form id="create-form">
         <label for="class_name">Class Name:</label>
         <input type="text" id="class_name" name="class_name" required>
-        <button type="submit">Create Class</button>
+        <button type="submit">Create Class (async)</button>
     </form>
+
+    <div id="status-area" style="display:none; margin-top:1rem;">
+        <p id="status-text">Starting...</p>
+        <button id="cancel-poll" style="display:none;">Cancel</button>
+    </div>
+
     <a href="/">Back to Home</a>
+
+    <script>
+    const form = document.getElementById('create-form');
+    const statusArea = document.getElementById('status-area');
+    const statusText = document.getElementById('status-text');
+    const cancelBtn = document.getElementById('cancel-poll');
+    let pollTimer = null;
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const className = document.getElementById('class_name').value.trim();
+        if(!className) return;
+        statusArea.style.display = '';
+        statusText.textContent = 'Submitting job...';
+        try {
+            const resp = await fetch('/create_class_async', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ class_name: className })
+            });
+            if(!resp.ok) {
+                const err = await resp.json().catch(()=>({error:'unknown'}));
+                statusText.textContent = 'Failed to start job: ' + (err.error || resp.statusText);
+                return;
+            }
+            const data = await resp.json();
+            const jobId = data.job_id;
+            statusText.textContent = 'Job started. Job ID: ' + jobId;
+            cancelBtn.style.display = '';
+            // start polling
+            pollTimer = setInterval(async () => {
+                try {
+                    const s = await fetch('/job_status/' + jobId);
+                    if(!s.ok) {
+                        statusText.textContent = 'Error polling job status';
+                        clearInterval(pollTimer);
+                        return;
+                    }
+                    const js = await s.json();
+                    statusText.textContent = 'Status: ' + js.status;
+                    if(js.status === 'completed') {
+                        clearInterval(pollTimer);
+                        cancelBtn.style.display = 'none';
+                        statusText.textContent = 'Completed! Redirecting...';
+                        // redirect to the class view using the saved filename if present
+                        const filename = js.result && js.result.filename;
+                        const classNameFromResult = js.result && js.result.class_name;
+                        // If filename is present, navigate to /class/<class_name> using class_name
+                        const targetName = classNameFromResult || className;
+                        window.location.href = '/class/' + encodeURIComponent(targetName);
+                    } else if(js.status === 'failed') {
+                        clearInterval(pollTimer);
+                        cancelBtn.style.display = 'none';
+                        statusText.textContent = 'Job failed: ' + (js.error || 'unknown');
+                    }
+                } catch (e) {
+                    statusText.textContent = 'Polling error: ' + e.message;
+                    clearInterval(pollTimer);
+                }
+            }, 2000);
+
+        } catch (err) {
+            statusText.textContent = 'Request failed: ' + err.message;
+        }
+    });
+
+    cancelBtn.addEventListener('click', () => {
+        if(pollTimer) clearInterval(pollTimer);
+        statusText.textContent = 'Polling cancelled.';
+        cancelBtn.style.display = 'none';
+    });
+    </script>
 </body>
 </html>

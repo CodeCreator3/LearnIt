@@ -1,8 +1,16 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from markupsafe import Markup
 from chat import ask_question  # Import your function
 import markdown
 from class_creator import create_class as create_class_util
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+
+# Executor and job tracking
+executor = ThreadPoolExecutor(max_workers=2)
+jobs = {}
+jobs_lock = threading.Lock()
 
 app = Flask(__name__)
 
@@ -153,6 +161,79 @@ def lesson_assistant(class_name, unit_name, lesson_name):
                         prompt = f"You are an assistant helping a student with the following lesson.\nLesson content:\n{content_val}\n\nPractice Problems:\n{problems_text}\n\nStudent question: {question}"
                         assistant_answer = Markup(markdown.markdown(ask_question(prompt)))
     return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=selected_lesson, lesson_content=lesson_content, practice_problems=practice_problems, unit_name=unit_name, prev_lesson=prev_lesson, next_lesson=next_lesson, assistant_answer=assistant_answer, assistant_question=question)
+
+
+
+def _serialize(obj):
+    # Recursively convert class objects to dicts/lists
+    if isinstance(obj, list):
+        return [_serialize(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: _serialize(v) for k, v in obj.items()}
+    elif hasattr(obj, "__dict__"):
+        return {k: _serialize(v) for k, v in obj.__dict__.items()}
+    else:
+        return obj
+
+
+def save_class_json(class_obj, filename=None):
+    import os
+    import json as pyjson
+    classes_dir = "classes"
+    os.makedirs(classes_dir, exist_ok=True)
+    # determine filename
+    class_name = None
+    if isinstance(class_obj, dict):
+        class_name = class_obj.get('class_name') or class_obj.get('title')
+    elif hasattr(class_obj, 'class_name'):
+        class_name = getattr(class_obj, 'class_name')
+    if filename is None:
+        safe_name = (class_name or 'class').replace(' ', '_')
+        filename = f"{safe_name}.json"
+    path = os.path.join(classes_dir, filename)
+    with open(path, 'w', encoding='utf-8') as f:
+        pyjson.dump(_serialize(class_obj), f, ensure_ascii=False, indent=2)
+    return filename
+
+
+def _run_create_job(class_name, job_id):
+    try:
+        with jobs_lock:
+            jobs[job_id]['status'] = 'running'
+        class_obj = create_class_util(class_name)
+        filename = save_class_json(class_obj)
+        with jobs_lock:
+            jobs[job_id]['status'] = 'completed'
+            jobs[job_id]['result'] = {'filename': filename, 'class_name': class_name, 'class': _serialize(class_obj)}
+    except Exception as e:
+        with jobs_lock:
+            jobs[job_id]['status'] = 'failed'
+            jobs[job_id]['error'] = str(e)
+
+
+@app.route('/create_class_async', methods=['POST'])
+def create_class_async():
+    data = request.get_json() or {}
+    class_name = data.get('class_name')
+    if not class_name:
+        return jsonify({'error': 'class_name is required'}), 400
+    job_id = str(uuid.uuid4())
+    with jobs_lock:
+        jobs[job_id] = {'status': 'pending'}
+    executor.submit(_run_create_job, class_name, job_id)
+    return jsonify({'job_id': job_id}), 202
+
+
+@app.route('/job_status/<job_id>', methods=['GET'])
+def job_status(job_id):
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if job is None:
+            return jsonify({'error': 'job not found'}), 404
+        # Return a shallow copy
+        response = dict(job)
+    return jsonify(response)
+
 
 if __name__ == "__main__":
     app.run(debug=True)
