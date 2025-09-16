@@ -3,9 +3,273 @@
 <head>
   <title>Home</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .progress { width: 100%; background: #eee; border-radius: 6px; overflow: hidden; margin-top:8px; }
+    .progress > div { height: 12px; background: linear-gradient(90deg,#4caf50,#6dd37b); width: 0%; transition: width 0.6s ease; }
+    .class-list { margin-top: 1rem; }
+    .card-link { color: #0066cc; text-decoration: none; }
+  .card { background:#fff; border-radius:10px; padding:12px; padding-bottom:56px; box-shadow:0 1px 3px rgba(0,0,0,0.08); position:relative; }
+  .card .icon-btn { position:absolute; bottom:10px; right:10px; width:36px; height:36px; border-radius:50%; border:none; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.12); display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5; }
+  .card .card-content { position:relative; z-index:1; }
+    .card .icon-btn:hover { transform:translateY(-2px); }
+    .card .icon-btn.trash { background:#fff; color:#c0392b; }
+    .card .icon-btn.cancel { background:#fff; color:#333; }
+    .icon-svg { width:18px; height:18px; pointer-events:none; }
+    body { background:#f3f5f7; font-family: Arial, sans-serif; }
+  </style>
 </head>
 <body>
-  <h1>Hello, world! 🚀</h1>
+  <h1>Your Classes</h1>
+
+  <section>
+    <h2>Create a class</h2>
+    <form id="create-form-home">
+      <input type="text" id="class_name_home" placeholder="Class name" required>
+      <button type="submit">Create (async)</button>
+    </form>
+  </section>
+
+  <section class="class-list">
+    <h2>Your classes</h2>
+    <div id="cards-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px;">
+      <!-- unified saved + in-progress cards -->
+    </div>
+  </section>
+
   <a href="/ask">Ask a question</a>
+
+  <script>
+  async function fetchAllCards(){
+    const grid = document.getElementById('cards-grid');
+    grid.innerHTML = '';
+    // Fetch classes and jobs in parallel
+    const [cResp, jResp] = await Promise.allSettled([fetch('/classes_list'), fetch('/jobs_list')]);
+    let classes = [];
+    let jobs = {};
+    try{ if(cResp.status === 'fulfilled' && cResp.value.ok) classes = await cResp.value.json(); }catch(e){}
+    try{ if(jResp.status === 'fulfilled' && jResp.value.ok) jobs = await jResp.value.json(); }catch(e){}
+
+    // Normalize classes into map by name
+    const map = {};
+    if(Array.isArray(classes)){
+      for(const entry of classes){
+        map[entry.name] = { name: entry.name, unit: entry.unit, lesson: entry.lesson, job: null };
+      }
+    }
+    // Merge jobs into map - job entries keyed by job id so find by class_name
+    for(const jid of Object.keys(jobs || {})){
+      const job = jobs[jid];
+      const cname = job.result && job.result.class_name;
+      if(!cname) continue;
+      if(!map[cname]) map[cname] = { name: cname, unit: job.unit || job.result && job.result.unit, lesson: job.lesson || job.result && job.result.lesson, job: job };
+      else map[cname].job = job;
+      // ensure unit/lesson may come from job result
+      if(job.unit) map[cname].unit = job.unit;
+      if(job.lesson) map[cname].lesson = job.lesson;
+    }
+
+    const names = Object.keys(map);
+    if(names.length === 0){
+      const p = document.createElement('div'); p.textContent = 'No classes yet.'; grid.appendChild(p); return;
+    }
+
+    for(const nm of names){
+      const info = map[nm];
+  const card = document.createElement('div');
+      card.className = 'card';
+  // attach identifiers so we can remove the DOM node immediately on cancel/delete
+  if(info.job && info.job.result && info.job.result.job_id) card.setAttribute('data-job-id', info.job.result.job_id);
+  if(info.name) card.setAttribute('data-class-name', info.name);
+  const title = document.createElement('div'); title.style.fontWeight='bold'; title.className = 'card-content'; title.textContent = (info.name || '').replace(/_/g, ' '); card.appendChild(title);
+      // Make whole card clickable (except icon buttons)
+      const targetUnit = info.unit;
+      const targetLesson = info.lesson;
+      let href;
+      if(targetUnit && targetLesson){
+        href = '/class/' + encodeURIComponent(info.name) + '/' + encodeURIComponent(targetUnit) + '/' + encodeURIComponent(targetLesson);
+      } else {
+        href = '/class/' + encodeURIComponent(info.name);
+      }
+      card.style.cursor = 'pointer';
+      card.setAttribute('role','link');
+      card.tabIndex = 0;
+      card.addEventListener('click', (e)=>{ window.location.href = href; });
+      card.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.href = href; } });
+
+      // If there's an in-progress job attached, show progress
+      if(info.job){
+        const status = document.createElement('div'); status.textContent = 'Status: ' + (info.job.status || 'pending'); card.appendChild(status);
+        const progWrap = document.createElement('div'); progWrap.className='progress'; const inner = document.createElement('div'); const percent = (info.job.progress && info.job.progress.percent) ? info.job.progress.percent : 0; inner.style.width = percent + '%'; progWrap.appendChild(inner); card.appendChild(progWrap);
+        const meta = document.createElement('div'); const est = info.job.progress && info.job.progress.est_seconds_remaining; meta.textContent = 'Progress: ' + percent + '%'; card.appendChild(meta);
+        // attach progress object for live updates and render estimate line
+        card._progress = info.job.progress || null;
+        const estLine = document.createElement('div'); estLine.className = 'est-line';
+        if(info.job.progress && typeof info.job.progress.est_seconds_remaining === 'number'){
+          estLine.textContent = formatDuration(info.job.progress.est_seconds_remaining);
+        } else {
+          estLine.textContent = '';
+        }
+        card.appendChild(estLine);
+        // cancel icon button (small circle in bottom-right)
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'icon-btn cancel';
+        cancelBtn.title = 'Cancel creation';
+        cancelBtn.setAttribute('aria-label','Cancel creation');
+        cancelBtn.innerHTML = '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+        cancelBtn.addEventListener('click', async (e)=>{
+          e.preventDefault();
+          e.stopPropagation();
+          if(!confirm('Cancel this creation job?')) return;
+          // Prefer explicit job_id from job.result, then job.job_id, then fallback to first key
+          let jid = null;
+          try{
+            if(info.job.result && info.job.result.job_id) jid = info.job.result.job_id;
+            else if(info.job.job_id) jid = info.job.job_id;
+            else if(typeof info.job === 'object') jid = Object.keys(info.job)[0];
+          }catch(err){ jid = null; }
+          if(!jid){ alert('Could not determine job id to cancel'); return; }
+          const encoded = encodeURIComponent(jid);
+          const r = await fetch('/cancel_job/' + encoded, { method: 'POST' });
+          if(r.ok) {
+            alert('Cancel requested');
+            // remove the card immediately
+            const parent = cancelBtn.closest('.card'); if(parent) parent.remove();
+          } else { const t = await r.json().catch(()=>({})); alert('Cancel failed: ' + (t.error || 'unknown')); }
+        });
+        card.appendChild(cancelBtn);
+      } else {
+        // delete saved class
+        const delBtn = document.createElement('button');
+        delBtn.className = 'icon-btn trash';
+        delBtn.title = 'Delete class';
+        delBtn.setAttribute('aria-label','Delete class');
+        delBtn.innerHTML = '<svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/></svg>';
+        delBtn.addEventListener('click', async (e)=>{
+          e.preventDefault();
+          e.stopPropagation();
+          if(!confirm('Delete saved class "' + info.name + '"? This cannot be undone.')) return;
+          const r = await fetch('/delete_class/' + encodeURIComponent(info.name), { method: 'DELETE' });
+          if(r.ok) { alert('Deleted'); const parent = delBtn.closest('.card'); if(parent) parent.remove(); } else { const t = await r.json().catch(()=>({})); alert('Delete failed: ' + (t.error || 'unknown')); }
+        });
+        card.appendChild(delBtn);
+      }
+
+      grid.appendChild(card);
+    }
+  }
+
+  // human-readable duration formatter: [Xd][Yh][Zm][Ws]
+  function formatDuration(seconds){
+    if(seconds == null || isNaN(seconds)) return '';
+    seconds = Math.max(0, Math.floor(seconds));
+    const days = Math.floor(seconds / 86400); seconds %= 86400;
+    const hours = Math.floor(seconds / 3600); seconds %= 3600;
+    const minutes = Math.floor(seconds / 60); seconds %= 60;
+    const secs = seconds;
+    let out = '';
+    if(days) out += days + 'd';
+    if(hours) out += hours + 'h';
+    if(minutes) out += minutes + 'm';
+    out += secs + 's';
+    return out;
+  }
+
+  // update estimates every second for visible cards
+  setInterval(()=>{
+    const cards = document.querySelectorAll('.card');
+    cards.forEach(card => {
+      const jobId = card.getAttribute('data-job-id');
+      if(!jobId) return;
+      // find progress object on the card by reading stored info if any
+      // we stored progress in an expando property earlier (attach to card)
+      const prog = card._progress;
+      if(!prog) return;
+      const est = prog.est_seconds_remaining;
+      const ts = prog._ts; // epoch seconds when estimate was computed
+      if(typeof est === 'number' && typeof ts === 'number'){
+        const elapsed = (Date.now()/1000) - ts;
+        const remaining = Math.max(0, Math.round(est - elapsed));
+        const estLine = card.querySelector('.est-line');
+        if(estLine) estLine.textContent = formatDuration(remaining);
+      }
+    });
+  }, 1000);
+
+  async function fetchJobs(){
+    const grid = document.getElementById('jobs-area-grid');
+    try{
+      const resp = await fetch('/jobs_list');
+      if(!resp.ok) throw new Error('jobs_list failed');
+      const js = await resp.json();
+      grid.innerHTML = '';
+      const ids = Object.keys(js);
+      if(ids.length === 0){
+        grid.innerHTML = '<div><p>No active jobs</p></div>';
+        return;
+      }
+      for(const id of ids){
+        const job = js[id];
+        const card = document.createElement('div');
+        card.style.borderRadius = '10px';
+        card.style.padding = '12px';
+        card.style.background = '#fff';
+        card.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+  const title = document.createElement('div');
+  title.style.fontWeight = 'bold';
+  title.style.marginBottom = '6px';
+  title.className = 'card-content';
+  const rawName = (job.result && job.result.class_name) ? job.result.class_name : null;
+  title.textContent = rawName ? rawName.replace(/_/g, ' ') : ('Job: ' + id);
+        const status = document.createElement('div');
+        status.textContent = 'Status: ' + (job.status || 'pending');
+        card.appendChild(title);
+        card.appendChild(status);
+        // progress bar
+        const progressWrap = document.createElement('div');
+        progressWrap.className = 'progress';
+        const inner = document.createElement('div');
+        const percent = (job.progress && job.progress.percent) ? job.progress.percent : 0;
+        inner.style.width = percent + '%';
+        progressWrap.appendChild(inner);
+        card.appendChild(progressWrap);
+  // meta
+  const meta = document.createElement('div');
+  const est = job.progress && job.progress.est_seconds_remaining;
+  meta.textContent = 'Progress: ' + percent + '%';
+  card.appendChild(meta);
+  // attach progress for live updating estimate
+  card._progress = job.progress || null;
+  const estLine = document.createElement('div'); estLine.className = 'est-line';
+  if(typeof est === 'number') estLine.textContent = formatDuration(est); else estLine.textContent = '';
+  card.appendChild(estLine);
+        grid.appendChild(card);
+      }
+    }catch(e){
+      console.error('error fetching jobs', e);
+    }
+  }
+
+  // create form on home
+  document.getElementById('create-form-home').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('class_name_home');
+    const name = input.value.trim();
+    if(!name) return;
+    const resp = await fetch('/create_class_async', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ class_name: name }) });
+    if(resp.ok){
+      const d = await resp.json();
+      const jobId = d.job_id;
+      // refresh cards immediately and continue polling
+      await fetchAllCards();
+    } else {
+      alert('Failed to start job');
+    }
+  });
+
+  // initial load
+  fetchAllCards();
+  // poll every 3 seconds
+  setInterval(fetchAllCards, 3000);
+  </script>
 </body>
 </html>

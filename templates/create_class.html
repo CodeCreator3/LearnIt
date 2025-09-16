@@ -64,11 +64,15 @@
                         cancelBtn.style.display = 'none';
                         statusText.textContent = 'Completed! Redirecting...';
                         // redirect to the class view using the saved filename if present
-                        const filename = js.result && js.result.filename;
                         const classNameFromResult = js.result && js.result.class_name;
-                        // If filename is present, navigate to /class/<class_name> using class_name
-                        const targetName = classNameFromResult || className;
-                        window.location.href = '/class/' + encodeURIComponent(targetName);
+                        const unit = js.result && js.result.unit;
+                        const lesson = js.result && js.result.lesson;
+                        const targetClass = classNameFromResult || className;
+                        if(unit && lesson){
+                            window.location.href = '/class/' + encodeURIComponent(targetClass) + '/' + encodeURIComponent(unit) + '/' + encodeURIComponent(lesson);
+                        } else {
+                            window.location.href = '/class/' + encodeURIComponent(targetClass);
+                        }
                     } else if(js.status === 'failed') {
                         clearInterval(pollTimer);
                         cancelBtn.style.display = 'none';

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file
 from markupsafe import Markup
 from chat import ask_question  # Import your function
 import markdown
@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 executor = ThreadPoolExecutor(max_workers=2)
 jobs = {}
 jobs_lock = threading.Lock()
+futures = {}
 
 app = Flask(__name__)
 
@@ -53,24 +54,23 @@ def create_class():
                 with open(json_path, "w", encoding="utf-8") as f:
                     pyjson.dump(serialize(class_obj), f, ensure_ascii=False, indent=2)
             classes[class_name] = class_obj
-            return redirect(url_for("view_class", class_name=class_name))
+            # Attempt to redirect to the first unit and lesson (U1 L1) if available
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    saved = __import__('json').load(f)
+                units = saved.get('units') if isinstance(saved, dict) else None
+                if units and len(units) > 0:
+                    first_unit = units[0]
+                    unit_name = first_unit.get('unit_name') or ''
+                    lessons = first_unit.get('lessons') or []
+                    if lessons and len(lessons) > 0:
+                        lesson_name = lessons[0].get('lesson_name') or ''
+                        return redirect(url_for('view_lesson', class_name=class_name, unit_name=unit_name, lesson_name=lesson_name))
+            except Exception:
+                pass
+            # fallback: go to home
+            return redirect(url_for('home'))
     return render_template("create_class.html")
-
-
-
-# View class with units/lessons sidebar
-@app.route("/class/<class_name>")
-def view_class(class_name):
-    import os
-    import json as pyjson
-    classes_dir = "classes"
-    json_path = os.path.join(classes_dir, f"{class_name}.json")
-    if not os.path.exists(json_path):
-        return redirect(url_for("home"))
-    with open(json_path, "r", encoding="utf-8") as f:
-        class_data = pyjson.load(f)
-    units = class_data["units"] if isinstance(class_data, dict) and "units" in class_data else []
-    return render_template("class_view.html", class_name=class_name, units=units, selected_lesson=None, lesson_content=None)
 
 
 # View lesson content
@@ -200,11 +200,38 @@ def _run_create_job(class_name, job_id):
     try:
         with jobs_lock:
             jobs[job_id]['status'] = 'running'
-        class_obj = create_class_util(class_name)
+        # progress callback will update job entry
+        def progress_callback(progress):
+            import time as _time
+            try:
+                # attach a timestamp so clients can continuously update remaining estimate
+                pcopy = dict(progress) if isinstance(progress, dict) else {'percent': progress}
+                pcopy['_ts'] = _time.time()
+            except Exception:
+                pcopy = progress
+            with jobs_lock:
+                jobs[job_id]['progress'] = pcopy
+
+        class_obj = create_class_util(class_name, progress_callback=progress_callback)
         filename = save_class_json(class_obj)
+        # determine first unit/lesson for quick linking
+        serialized = _serialize(class_obj)
+        first_unit = None
+        first_lesson = None
+        try:
+            units = serialized.get('units') if isinstance(serialized, dict) else None
+            if units and len(units) > 0:
+                first = units[0]
+                first_unit = first.get('unit_name') if isinstance(first, dict) else None
+                lessons = first.get('lessons') if isinstance(first, dict) else []
+                if lessons and len(lessons) > 0:
+                    first_lesson = lessons[0].get('lesson_name') if isinstance(lessons[0], dict) else None
+        except Exception:
+            first_unit = None
+            first_lesson = None
         with jobs_lock:
             jobs[job_id]['status'] = 'completed'
-            jobs[job_id]['result'] = {'filename': filename, 'class_name': class_name, 'class': _serialize(class_obj)}
+            jobs[job_id]['result'] = {'filename': filename, 'class_name': class_name, 'class': serialized, 'unit': first_unit, 'lesson': first_lesson, 'job_id': job_id}
     except Exception as e:
         with jobs_lock:
             jobs[job_id]['status'] = 'failed'
@@ -219,8 +246,11 @@ def create_class_async():
         return jsonify({'error': 'class_name is required'}), 400
     job_id = str(uuid.uuid4())
     with jobs_lock:
-        jobs[job_id] = {'status': 'pending'}
-    executor.submit(_run_create_job, class_name, job_id)
+        # include the requested class_name and job_id right away so UI can show the job immediately
+        jobs[job_id] = {'status': 'pending', 'result': {'class_name': class_name, 'job_id': job_id}}
+    future = executor.submit(_run_create_job, class_name, job_id)
+    with jobs_lock:
+        futures[job_id] = future
     return jsonify({'job_id': job_id}), 202
 
 
@@ -235,5 +265,139 @@ def job_status(job_id):
     return jsonify(response)
 
 
+@app.route('/cancel_job/<job_id>', methods=['POST'])
+def cancel_job(job_id):
+    with jobs_lock:
+        job = jobs.get(job_id)
+        fut = futures.get(job_id)
+        if job is None:
+            return jsonify({'error': 'job not found'}), 404
+        # try to cancel
+        cancelled = False
+        if fut:
+            cancelled = fut.cancel()
+        # remove job from tracking so polling clients no longer see it
+        try:
+            if job_id in jobs:
+                del jobs[job_id]
+        except Exception:
+            pass
+        try:
+            if job_id in futures:
+                del futures[job_id]
+        except Exception:
+            pass
+    return jsonify({'cancelled': bool(cancelled)})
+
+
+@app.route('/delete_class/<class_name>', methods=['DELETE'])
+def delete_class(class_name):
+    import os
+    classes_dir = 'classes'
+    path = os.path.join(classes_dir, f"{class_name}.json")
+    if not os.path.exists(path):
+        return jsonify({'error': 'class not found'}), 404
+    try:
+        os.remove(path)
+        # remove in-memory entry if present
+        if class_name in classes:
+            del classes[class_name]
+        return jsonify({'deleted': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/jobs_list', methods=['GET'])
+def jobs_list():
+    with jobs_lock:
+        # produce a shallow copy of jobs with id included
+        out = {jid: dict(info) for jid, info in jobs.items()}
+    return jsonify(out)
+
+
+@app.route('/classes_list', methods=['GET'])
+def classes_list():
+    import os
+    import json as pyjson
+    classes_dir = 'classes'
+    if not os.path.exists(classes_dir):
+        return jsonify([])
+    out = []
+    for f in os.listdir(classes_dir):
+        if not f.endswith('.json'):
+            continue
+        path = os.path.join(classes_dir, f)
+        name = os.path.splitext(f)[0]
+        unit_name = None
+        lesson_name = None
+        try:
+            with open(path, 'r', encoding='utf-8') as fh:
+                data = pyjson.load(fh)
+            units = data.get('units') if isinstance(data, dict) else None
+            if units and len(units) > 0:
+                first_unit = units[0]
+                unit_name = first_unit.get('unit_name') or None
+                lessons = first_unit.get('lessons') or []
+                if lessons and len(lessons) > 0:
+                    lesson_name = lessons[0].get('lesson_name') or None
+        except Exception:
+            # on any error, just return the filename with nulls
+            pass
+        out.append({'name': name, 'unit': unit_name, 'lesson': lesson_name})
+    return jsonify(out)
+
+
 if __name__ == "__main__":
     app.run(debug=True)
+
+
+@app.route('/class_image/<class_name>')
+def class_image(class_name):
+    import os
+    import io
+    from PIL import Image
+
+    safe_name = str(class_name).replace(' ', '_').replace('/', '_')
+    images_dir = 'images'
+    os.makedirs(images_dir, exist_ok=True)
+    path = os.path.join(images_dir, f"{safe_name}.png")
+    # Serve cached image if present
+    if os.path.exists(path):
+        return send_file(path, mimetype='image/png')
+
+    # Try to generate using diffusers + torch (Stable Diffusion). If unavailable or any error, return transparent PNG.
+    try:
+        import torch
+        from diffusers import StableDiffusionPipeline
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model_id = "runwayml/stable-diffusion-v1-5"
+
+        # load pipeline (may require significant resources and model files to be present locally)
+        pipe = StableDiffusionPipeline.from_pretrained(model_id)
+        pipe = pipe.to(device)
+
+        prompt = f"Subtle abstract background representing the topic '{class_name}', soft pastel colors, minimal, no text, simple shapes, high quality, suitable as a faded background for an educational card"
+        generator = None
+        try:
+            # deterministic seed based on class name
+            seed = abs(hash(class_name)) % (2**32)
+            if device == 'cuda':
+                generator = torch.Generator(device).manual_seed(seed)
+            else:
+                generator = torch.Generator().manual_seed(seed)
+        except Exception:
+            generator = None
+
+        result = pipe(prompt, guidance_scale=7.0, height=512, width=512, generator=generator)
+        image = result.images[0]
+        # Save to cache
+        image.save(path)
+        return send_file(path, mimetype='image/png')
+    except Exception as e:
+        # Fallback: transparent PNG
+        buf = io.BytesIO()
+        img = Image.new('RGBA', (512, 512), (255, 255, 255, 0))
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png')

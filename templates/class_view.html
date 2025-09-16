@@ -93,7 +93,12 @@
         <div style="display: flex;">
             <div style="flex: 1;">
                 {% if lesson_content %}
-                    <h2>{{ selected_lesson }}</h2>
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <h2 style="margin:0;">{{ selected_lesson }}</h2>
+                        <div>
+                            <a href="/" class="btn" style="margin-right:8px;">Home</a>
+                        </div>
+                    </div>
                     <div>{{ lesson_content|safe }}</div>
                     {% if practice_problems and practice_problems|length > 0 %}
                         <hr>
